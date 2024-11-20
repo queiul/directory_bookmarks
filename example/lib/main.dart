@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:directory_bookmarks/directory_bookmarks.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 void main() {
   runApp(const MyApp());
@@ -34,13 +34,18 @@ class _DirectoryBookmarksDemoState extends State<DirectoryBookmarksDemo> {
   BookmarkData? _currentBookmark;
   List<String> _files = [];
   bool _hasWritePermission = false;
+  String? _errorMessage;
   final TextEditingController _fileNameController = TextEditingController();
   final TextEditingController _fileContentController = TextEditingController();
+
+  bool get _isSupported =>
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {
     super.initState();
-    _loadBookmark();
+    _checkPlatformAndLoadBookmark();
   }
 
   @override
@@ -50,42 +55,84 @@ class _DirectoryBookmarksDemoState extends State<DirectoryBookmarksDemo> {
     super.dispose();
   }
 
+  Future<void> _checkPlatformAndLoadBookmark() async {
+    if (!_isSupported) {
+      setState(() {
+        _errorMessage =
+            'Platform ${defaultTargetPlatform.name} is not supported yet. '
+            'Currently supported platforms: macOS (full support), '
+            'Android (partial support).';
+      });
+      return;
+    }
+
+    try {
+      await _loadBookmark();
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error: $e';
+      });
+    }
+  }
+
   Future<void> _loadBookmark() async {
     final bookmark = await DirectoryBookmarkHandler.resolveBookmark();
     if (bookmark != null) {
       setState(() {
         _currentBookmark = bookmark;
+        _errorMessage = null;
       });
       await _checkPermissionAndLoadFiles();
     }
   }
 
   Future<void> _checkPermissionAndLoadFiles() async {
-    final hasPermission = await DirectoryBookmarkHandler.hasWritePermission();
-    setState(() {
-      _hasWritePermission = hasPermission;
-    });
-    if (hasPermission) {
-      await _loadFiles();
+    try {
+      final hasPermission = await DirectoryBookmarkHandler.hasWritePermission();
+      setState(() {
+        _hasWritePermission = hasPermission;
+        _errorMessage = null;
+      });
+      if (hasPermission) {
+        await _loadFiles();
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Permission error: $e';
+      });
     }
   }
 
   Future<void> _loadFiles() async {
-    final files = await DirectoryBookmarkHandler.listFiles();
-    if (files != null) {
+    try {
+      final files = await DirectoryBookmarkHandler.listFiles();
+      if (files != null) {
+        setState(() {
+          _files = files;
+          _errorMessage = null;
+        });
+      }
+    } catch (e) {
       setState(() {
-        _files = files;
+        _errorMessage = 'Error loading files: $e';
       });
     }
   }
 
   Future<void> _selectDirectory() async {
+    if (!_isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_errorMessage ?? 'Platform not supported')),
+      );
+      return;
+    }
+
     String? path;
     try {
       path = await FilePicker.platform.getDirectoryPath(
         dialogTitle: 'Select a directory to bookmark',
       );
-      
+
       if (path == null) {
         // User canceled the picker
         return;
@@ -201,7 +248,8 @@ class _DirectoryBookmarksDemoState extends State<DirectoryBookmarksDemo> {
 
   Future<void> _viewFile(String fileName) async {
     try {
-      final content = await DirectoryBookmarkHandler.readStringFromFile(fileName);
+      final content =
+          await DirectoryBookmarkHandler.readStringFromFile(fileName);
       if (!mounted) return;
       if (content != null) {
         showDialog(
@@ -265,112 +313,108 @@ class _DirectoryBookmarksDemoState extends State<DirectoryBookmarksDemo> {
       appBar: AppBar(
         title: const Text('Directory Bookmarks Demo'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.folder_open),
-            onPressed: _selectDirectory,
-            tooltip: 'Select Directory',
-          ),
+          if (_isSupported && _currentBookmark != null)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadFiles,
+              tooltip: 'Refresh files',
+            ),
         ],
       ),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Theme.of(context).colorScheme.surfaceVariant,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: _errorMessage != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Current Directory:',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(_currentBookmark?.path ?? 'No directory selected'),
-                      ],
+                    const Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: Colors.red,
                     ),
-                    FilledButton.icon(
-                      onPressed: _selectDirectory,
-                      icon: const Icon(Icons.folder_open),
-                      label: const Text('Select Directory'),
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ],
                 ),
-                if (_currentBookmark != null) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(
-                        _hasWritePermission ? Icons.check_circle : Icons.error,
-                        color: _hasWritePermission ? Colors.green : Colors.red,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Write Permission: ${_hasWritePermission ? "Granted" : "Not Granted"}',
-                        style: TextStyle(
-                          color: _hasWritePermission ? Colors.green : Colors.red,
-                        ),
-                      ),
-                    ],
+              ),
+            )
+          : _currentBookmark == null
+              ? Center(
+                  child: Text(
+                    'No directory bookmarked yet.\n'
+                    'Click the button below to select a directory.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: _saveTestFile,
-                    child: const Text('Save Test File'),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: _files.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.folder_open,
-                          size: 48,
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _currentBookmark == null
-                              ? 'Select a directory to start'
-                              : 'No files in directory',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                      ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Bookmarked Directory:',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(_currentBookmark!.path),
+                          if (!_hasWritePermission) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Write permission required to create files',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: _files.length,
-                    itemBuilder: (context, index) {
-                      final fileName = _files[index];
-                      return ListTile(
-                        leading: const Icon(Icons.description),
-                        title: Text(fileName),
-                        onTap: () => _viewFile(fileName),
-                      );
-                    },
-                  ),
+                    const Divider(),
+                    Expanded(
+                      child: _files.isEmpty
+                          ? const Center(
+                              child: Text('No files in directory'),
+                            )
+                          : ListView.builder(
+                              itemCount: _files.length,
+                              itemBuilder: (context, index) {
+                                final fileName = _files[index];
+                                return ListTile(
+                                  leading: const Icon(Icons.description),
+                                  title: Text(fileName),
+                                  onTap: () => _viewFile(fileName),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_isSupported && _currentBookmark != null && _hasWritePermission)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: FloatingActionButton(
+                onPressed: _showCreateFileDialog,
+                heroTag: 'create_file',
+                child: const Icon(Icons.note_add),
+              ),
+            ),
+          FloatingActionButton(
+            onPressed: _selectDirectory,
+            heroTag: 'select_directory',
+            child: const Icon(Icons.folder_open),
           ),
         ],
       ),
-      floatingActionButton: _currentBookmark == null
-          ? null
-          : FloatingActionButton(
-              onPressed: _showCreateFileDialog,
-              tooltip: 'Create File',
-              child: const Icon(Icons.add),
-            ),
     );
   }
 }
