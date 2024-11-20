@@ -1,6 +1,6 @@
 name: directory_bookmarks
 description: A Flutter plugin for cross-platform directory bookmarking and secure file operations. Currently supports macOS security-scoped bookmarks, with Android support in development.
-version: 0.1.0
+version: 0.1.1
 homepage: https://github.com/queiul/directory_bookmarks
 repository: https://github.com/queiul/directory_bookmarks
 issue_tracker: https://github.com/queiul/directory_bookmarks/issues

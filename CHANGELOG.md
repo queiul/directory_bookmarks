@@ -15,3 +15,7 @@ Initial release with the following features:
   * Check write permissions
 * Example app demonstrating all features
 * Comprehensive documentation and platform setup guides
+
+## 0.1.1
+
+* Updated documentation
